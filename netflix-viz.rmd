@@ -1,0 +1,160 @@
+---
+title: "Netflix_graphs"
+author: "Vesa Kauppinen"
+date: "3/1/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(plotly)
+library(ggplot2)
+library(lubridate)
+library(data.table)
+library(maps)
+library(gganimate)
+library(gifski)
+
+dat<-read_csv('netflix_titles.csv')
+
+dat %>% count(show_id)
+
+dat$date_added <- mdy(dat$date_added)
+dat$duration <- gsub("[^0-9.-]", "", dat$duration)
+dat$duration <- as.numeric(dat$duration)
+
+```
+## Data 
+
+The data used is Kaggle dataset consisting of TV shows and movies listed on Netflix https://www.kaggle.com/shivamb/netflix-shows.
+
+
+## Graph 1: Cumulative number of shows added into Netflix by date and type of show
+
+Below graph shows a cumulative number of shows into Netflix by date and the type of show (Movies/TV Shows)).
+
+```{r g1, echo=FALSE}
+movies <- dat %>% select(show_id, date_added, type) %>% group_by(date_added, type) %>%
+ filter(type=='Movie') %>% summarise(nbr_shows = n())
+movies$Movies <- cumsum(movies$nbr_shows)
+movies <- movies %>% select(date_added,Movies)
+
+tv_shows <-  dat %>% select(show_id, date_added, type) %>% group_by(date_added, type) %>%
+        filter(type=='TV Show') %>% summarise(nbr_shows = n())
+tv_shows$TV_shows <- cumsum(tv_shows$nbr_shows)
+tv_shows <- tv_shows %>% select(date_added,TV_shows)
+
+dat2 <- merge(x = tv_shows, y =movies, by = "date_added", all = TRUE)
+
+
+
+dat3 <- data.table(dat2)
+
+setnafill(dat3, type = "locf")
+
+dat3_long <- gather(dat3,type, count, TV_shows:Movies,factor_key = TRUE)
+ggplot(dat3_long, aes(x=date_added, y=count, fill=type)) + geom_area() +ylim(0,10000) + 
+        xlab('Date') + ggtitle('Cumulative count of shows added into Netflix')
+
+```
+
+## Graph 2: Number of shows by their release year.
+
+The below histogram shows the number of shows available in Netflix by their release year.
+
+```{r 2, echo=FALSE}
+ggplot(dat, aes(x=release_year)) + geom_histogram(bins=100) + ggtitle('Count of shows in Netflix by the release year') + xlab('Release year')
+```
+
+## Graph 3: Duration of movies and TV shows
+
+Below figure shows a boxplot presentation of distributions of durations of movies (in mins) and TV shows (in number of seasons) in Netflix.
+
+```{r 3, echo=FALSE}
+
+ggplot(dat, aes(x=type, y=duration, fill=type)) + geom_boxplot() + facet_wrap(~type, scales="free") +
+        ggtitle("Duration of movies (minutes) and TV shows (seasons) in Netflix") + xlab("")
+
+```
+
+## Graph 4: Number of shows in Netflix by the country of origin
+
+Below plotly presentation shows the number of shows in Netflix by the origin country.
+
+
+```{r 4, echo = FALSE}
+dat_country <- dat %>% group_by(country) %>% summarise(count = n()) %>% 
+ rename (region=country)
+dat_country$region[dat_country$region=='United States'] <- 'USA'
+dat_country$region[dat_country$region=='United Kingdom'] <- 'UK'
+my_world_map <- map_data("world")
+map_data_combined <- left_join(my_world_map, dat_country,by='region')
+ggplotly(ggplot(data=map_data_combined, mapping=aes(x=long, y=lat,group=group, fill=count))+
+        geom_polygon() + scale_colour_brewer(palette = "Set1") +
+        ggtitle('Number of shows by origin country'))
+```
+
+## Graph 5: Count of shows by rating in Netflix
+
+Below graph shows ount of shows by rating in Netflix
+
+```{r 5, echo=FALSE}
+
+flix2 <- dat %>%  select(show_id, rating, type) %>% 
+        group_by(rating) %>% summarise(count= n())
+
+ ggplot(flix2, aes(x=reorder(rating,count), y=count)) + geom_bar(stat='identity') +
+        coord_flip() + xlab('Rating') + ggtitle('Count of shows by rating') 
+
+```
+
+## Graph 6: Median duration of movies from USA, UK and India by the year of release
+
+Below graph shows th median duration of movies from USA, UK and India available in Netflix by the year of release.
+
+
+```{r 6, echo = FALSE}
+dur_dat <- dat %>% filter(type == 'Movie') %>% select(duration, release_year,show_id,country) %>%
+        filter(country %in% c('United States','United Kingdom','India')) %>%
+        group_by(release_year) %>% mutate(median_duration = median(duration))
+
+ggplot(dur_dat, aes(x=release_year,y=median_duration, color=country)) + geom_point() +
+        geom_smooth(method='lm') +
+       xlab('Release year') +   scale_color_manual(values=c('red','blue','green')) +
+        ggtitle('Median duration of movies by selected origin countries by the year released') +
+        ylab('Median movduration (mins)')
+```
+
+## Graph 7: Number of shows in Netflix by release from selected origin countries.
+
+Number of shows in Netflix by release from selected origin countries.
+
+
+```{r 7, echo=FALSE}
+dur_dat1 <- dat %>% filter(type == 'TV Show', release_year >= 2000) %>% select(duration, release_year,show_id,country) %>%
+        filter(country %in% c('United States','United Kingdom','India','Japan')) %>%
+        group_by(show_id,release_year,country) %>% summarise(count = n())
+
+my_anim <- ggplot(dur_dat1, aes(x=release_year,y=count, fill=country)) + geom_bar(stat='identity') + transition_states(country) + exit_fade() + enter_fade()+xlab('Release year')+
+        ggtitle('Number of shows by release year')
+my_anim
+```
+
+## Graph 8: Average duration of Netflix TV shows by release year
+
+Average duration of Netflix TV shows by release year (2000-2021) from selected origin countries.
+
+```{r 8, echo=FALSE}
+dur_dat2 <- dat %>% filter(type == 'TV Show', release_year >= 2000) %>% 
+        filter(country %in% c('United States','United Kingdom','India','Japan')) %>%
+        select(release_year,country,duration) %>%
+        group_by(release_year,country) %>% summarise(mean_duration = mean(duration))
+
+my_anim2 <- ggplot(dur_dat2, aes(x=release_year, y=mean_duration, fill=country)) + geom_bar(stat='identity') +  transition_states(country) + exit_fade() + enter_fade() + 
+        xlab('Release year') + ylab('Averega duration (seasons)') +
+        ggtitle('Average duration of Netflix TV shows by release year')
+my_anim2
+```
+
